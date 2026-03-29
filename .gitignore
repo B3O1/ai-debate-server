@@ -1,0 +1,20 @@
+# 환경 변수 (매우 중요! API 키 유출 방지)
+.env
+
+# 파이썬 캐시 파일
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 가상 환경
+venv/
+.venv/
+env/
+.env_folder/
+
+# macOS 환경 파일
+.DS_Store
+
+# IDE 및 에디터 설정 파일 (선택 사항)
+.vscode/
+.idea/

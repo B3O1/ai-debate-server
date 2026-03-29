@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 토론 연습장 - 마스터 모드</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .custom-scroll::-webkit-scrollbar { width: 4px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+    <div class="max-w-[1600px] mx-auto px-4 py-8">
+        <header class="text-center mb-10">
+            <h1 class="text-3xl font-bold text-slate-800">⚔️ AI 토론 마스터 대시보드</h1>
+            <p class="text-slate-500 mt-2">상황과 성격을 설정하고 치열하게 토론한 뒤, 코히어 심판에게 성적표를 받아보세요!</p>
+        </header>
+
+        <div class="grid grid-cols-12 gap-6">
+            
+            <div class="col-span-12 lg:col-span-3">
+                <div class="bg-white rounded-2xl shadow-sm p-5 border border-red-100 h-[600px] flex flex-col">
+                    <h3 class="font-bold text-red-600 mb-4 flex items-center justify-between">
+                        <span>🤖 AI 반박 요약</span>
+                        <span id="ai-count" class="bg-red-100 text-red-800 text-xs px-2 py-1 rounded">0</span>
+                    </h3>
+                    <div id="ai-history-list" class="custom-scroll space-y-3 overflow-y-auto flex-1 text-sm">
+                        <p class="text-center text-slate-400 py-10" id="ai-empty">기록 없음</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-span-12 lg:col-span-6">
+                <div class="bg-white rounded-2xl shadow-md p-6 border border-slate-200 h-[600px] flex flex-col">
+                    
+                    <div class="mb-2 flex gap-2">
+                        <select id="model-type" class="flex-1 p-2 rounded border border-slate-200 font-medium text-slate-700">
+                            <option value="groq" selected>⚡ 그록 (빠름, 10만 한도)</option>
+                            <option value="gemini">💎 제미나이 (균형, 1500회)</option>
+                            <option value="cohere">🕊️ 코히어 (친화력, 1000회)</option>
+                        </select>
+                        <select id="debate-style" class="flex-1 p-2 rounded border border-slate-200 font-medium text-slate-700">
+                            <option value="logical">⚖️ 분석적 성격</option>
+                            <option value="aggressive" selected>🔥 공격적 성격</option>
+                            <option value="kind">🌷 친절한 성격</option>
+                        </select>
+                    </div>
+                    <div class="mb-4 flex gap-2">
+                        <select id="meeting-atmosphere" class="flex-1 p-2 rounded border border-slate-200 font-bold text-indigo-700 bg-indigo-50">
+                            <option value="adversarial" selected>⚔️ 안건 대립 (적대적 토론)</option>
+                            <option value="cooperative">🤝 목표 일치 (협력적 회의)</option>
+                        </select>
+                        <button onclick="resetDebate()" class="px-4 py-2 bg-slate-100 rounded font-bold text-slate-600 hover:bg-slate-200">초기화</button>
+                        <button onclick="finishDebate()" class="px-4 py-2 bg-purple-600 text-white rounded font-bold hover:bg-purple-700">🏁 평가받기</button>
+                    </div>
+
+                    <div class="mb-4 bg-slate-100 rounded-full h-5 overflow-hidden border border-slate-200 relative shadow-inner">
+                        <div id="token-bar" class="bg-slate-300 h-full transition-all duration-700" style="width: 100%"></div>
+                        <p id="token-label" class="absolute inset-0 flex items-center justify-center text-[11px] font-bold text-slate-700">
+                            대화 시작 시 AI 모델별 토큰 사용량이 표시됩니다.
+                        </p>
+                    </div>
+
+                    <div id="chat-box" class="flex-1 space-y-4 overflow-y-auto custom-scroll mb-4 pr-2">
+                        <div class="text-center text-slate-400 mt-20" id="start-msg">주장을 입력하여 토론을 시작하세요.</div>
+                    </div>
+
+                    <div class="relative mt-auto">
+                        <input id="user-input" type="text" placeholder="주장을 입력하세요..." 
+                               class="w-full p-4 pr-20 rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500"
+                               onkeypress="if(event.keyCode==13) sendClaim()">
+                        <button onclick="sendClaim()" class="absolute right-2 top-2 bottom-2 bg-blue-600 text-white px-4 rounded-lg font-bold">
+                            전송
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-span-12 lg:col-span-3">
+                <div class="bg-white rounded-2xl shadow-sm p-5 border border-blue-100 h-[600px] flex flex-col">
+                    <h3 class="font-bold text-blue-600 mb-4 flex items-center justify-between">
+                        <span id="user-count" class="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded">0</span>
+                        <span>나의 주장 요약 👤</span>
+                    </h3>
+                    <div id="user-history-list" class="custom-scroll space-y-3 overflow-y-auto flex-1 text-sm text-right">
+                        <p class="text-center text-slate-400 py-10" id="user-empty">기록 없음</p>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        const chatBox = document.getElementById('chat-box');
+        const userInput = document.getElementById('user-input');
+        const modelSelect = document.getElementById('model-type');
+        const styleSelect = document.getElementById('debate-style');
+        const atmosphereSelect = document.getElementById('meeting-atmosphere');
+
+        window.onload = () => {
+            const savedData = localStorage.getItem('debateData');
+            if (savedData) {
+                const data = JSON.parse(savedData);
+                const startMsg = document.getElementById('start-msg');
+                if(startMsg && data.chatHTML) startMsg.remove();
+
+                if (data.model) modelSelect.value = data.model;
+                if (data.style) styleSelect.value = data.style;
+                if (data.atmosphere) atmosphereSelect.value = data.atmosphere;
+                
+                if (data.chatHTML) {
+                    chatBox.innerHTML = data.chatHTML;
+                    chatBox.scrollTop = chatBox.scrollHeight;
+                }
+                updateHistoryBoards(data.uHistory, data.aHistory);
+                updateTokenUI(data.totalTokens, data.model);
+            }
+        };
+
+        function saveState(uHistory, aHistory, totalTokens) {
+            const data = {
+                model: modelSelect.value,
+                style: styleSelect.value,
+                atmosphere: atmosphereSelect.value,
+                chatHTML: chatBox.innerHTML,
+                uHistory: uHistory,
+                aHistory: aHistory,
+                totalTokens: totalTokens
+            };
+            localStorage.setItem('debateData', JSON.stringify(data));
+        }
+
+        async function resetDebate() {
+            const savedData = localStorage.getItem('debateData');
+            let backupTokens = null;
+            let currentModel = modelSelect.value;
+            let currentStyle = styleSelect.value;
+            let currentAtmosphere = atmosphereSelect.value;
+            
+            if (savedData) {
+                backupTokens = JSON.parse(savedData).totalTokens;
+            }
+
+            localStorage.removeItem('debateData'); 
+
+            if (backupTokens !== null && backupTokens !== undefined) {
+                localStorage.setItem('debateData', JSON.stringify({
+                    model: currentModel,
+                    style: currentStyle,
+                    atmosphere: currentAtmosphere,
+                    totalTokens: backupTokens
+                }));
+            }
+            
+            try {
+                await fetch('http://localhost:8000/api/v1/debate/reset', { method: 'POST' });
+            } catch (error) {}
+            location.reload(); 
+        }
+
+        async function sendClaim() {
+            const text = userInput.value.trim();
+            if (!text) return;
+
+            const startMsg = document.getElementById('start-msg');
+            if(startMsg) startMsg.remove();
+
+            appendMessage('user', text);
+            userInput.value = '';
+
+            const loadingId = 'load-' + Date.now();
+            appendMessage('ai', '분석 중...', loadingId);
+
+            try {
+                const response = await fetch('http://localhost:8000/api/v1/debate/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    // 💡 서버에 분위기(atmosphere) 값도 같이 보냅니다.
+                   body: JSON.stringify({ 
+                       message: text, 
+                       model_type: modelSelect.value, 
+                       debate_style: styleSelect.value,
+                       atmosphere: atmosphereSelect.value
+                   })
+                });
+                
+                const result = await response.json();
+                
+                document.getElementById(loadingId).remove();
+                appendMessage('ai', result.ai_rebuttal, null, result.evaluation);
+                updateHistoryBoards(result.user_history, result.ai_history);
+                updateTokenUI(result.total_tokens, modelSelect.value);
+                saveState(result.user_history, result.ai_history, result.total_tokens);
+
+            } catch (err) {
+                document.getElementById(loadingId).innerHTML = "⚠️ 오류 발생";
+            }
+        }
+
+        // 💡 심판 모드 호출 함수!
+        async function finishDebate() {
+            const loadingId = 'load-eval-' + Date.now();
+            
+            // 로딩 메시지 띄우기
+            const div = document.createElement('div');
+            div.id = loadingId;
+            div.className = "text-center text-purple-600 font-bold my-4 animate-pulse";
+            div.innerText = "⚖️ 코히어 심판이 전체 대화를 분석 중입니다...";
+            chatBox.appendChild(div);
+            chatBox.scrollTop = chatBox.scrollHeight;
+
+            try {
+                const response = await fetch('http://localhost:8000/api/v1/debate/evaluate', {
+                    method: 'POST'
+                });
+                const result = await response.json();
+                document.getElementById(loadingId).remove();
+
+                // 💡 성적표 황금색 카드로 이쁘게 렌더링
+                const evalCard = document.createElement('div');
+                evalCard.className = "bg-gradient-to-br from-yellow-50 to-amber-50 border-2 border-amber-200 p-5 rounded-2xl shadow-md my-6 mx-2";
+                evalCard.innerHTML = `
+                    <h3 class="text-xl font-bold text-amber-800 border-b border-amber-200 pb-2 mb-3">🏆 최종 토론 성적표 (심판: 코히어)</h3>
+                    <div class="text-3xl font-black text-amber-600 mb-4 text-center">총점: ${result.score} / 100 점</div>
+                    <div class="space-y-3 text-sm text-slate-800">
+                        <p><span class="font-bold text-green-700">✨ 베스트 논리:</span> ${result.best}</p>
+                        <p><span class="font-bold text-red-700">⚠️ 치명적 허점:</span> ${result.worst}</p>
+                        <div class="mt-4 p-3 bg-white/60 rounded-lg border border-amber-100">
+                            <span class="font-bold text-purple-700">💡 심판의 종합 피드백:</span><br>
+                            ${result.feedback}
+                        </div>
+                    </div>
+                `;
+                chatBox.appendChild(evalCard);
+                chatBox.scrollTop = chatBox.scrollHeight;
+
+                // 코히어 토큰 UI 업데이트
+                updateTokenUI(result.total_tokens, 'cohere');
+                // 저장 (성적표도 화면에 남게)
+                saveState(null, null, null);
+
+            } catch (err) {
+                document.getElementById(loadingId).innerHTML = "⚠️ 평가 중 오류 발생";
+            }
+        }
+
+        function updateTokenUI(total, model) {
+            if (total === undefined || total === null) return;
+            const tokenBar = document.getElementById('token-bar');
+            const tokenLabel = document.getElementById('token-label');
+
+            if (model === 'groq') {
+                let remain = 100000 - total;
+                if (remain < 0) remain = 0;
+                tokenLabel.innerHTML = `⚡ 그록 일일 잔여: <span class="mx-1 text-red-700 font-black">${remain.toLocaleString()}</span> / 100,000`;
+                let percentage = (total / 100000) * 100;
+                tokenBar.style.width = Math.min(percentage, 100) + '%';
+                if (percentage > 80) tokenBar.className = "bg-gradient-to-r from-red-500 to-red-600 h-full transition-all duration-700";
+                else if (percentage > 50) tokenBar.className = "bg-gradient-to-r from-orange-400 to-orange-500 h-full transition-all duration-700";
+                else tokenBar.className = "bg-gradient-to-r from-emerald-400 to-emerald-500 h-full transition-all duration-700";
+            } else if (model === 'gemini') {
+                tokenLabel.innerHTML = `💎 제미나이 누적 사용: <span class="mx-1 text-blue-700 font-black">${total.toLocaleString()}</span> 토큰 (호출 횟수 제한 주의)`;
+                tokenBar.style.width = '100%';
+                tokenBar.className = "bg-blue-200 h-full transition-all duration-700";
+            } else if (model === 'cohere') {
+                tokenLabel.innerHTML = `🕊️ 코히어 누적 사용: <span class="mx-1 text-teal-700 font-black">${total.toLocaleString()}</span> 토큰 (월 1,000회 가능)`;
+                tokenBar.style.width = '100%';
+                tokenBar.className = "bg-teal-200 h-full transition-all duration-700";
+            }
+        }
+
+        function appendMessage(role, text, id = null, evalData = null) {
+            const div = document.createElement('div');
+            div.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'}`;
+            if(id) div.id = id;
+
+            let content = '';
+            if (role === 'user') {
+                content = `<div class="bg-blue-600 text-white px-4 py-2 rounded-2xl rounded-tr-none max-w-[85%]">${text}</div>`;
+            } else {
+                content = `
+                    <div class="bg-white border border-slate-200 p-4 rounded-2xl rounded-tl-none max-w-[90%] w-full shadow-sm">
+                        <div class="text-slate-800 font-medium mb-2">${text} ${evalData?.is_emotional ? '⚠️' : ''}</div>
+                        ${evalData ? `
+                        <div class="mt-3 pt-3 border-t border-slate-100 text-xs text-slate-500">
+                            <div>논리성: ${evalData.logic_score}/10 | 설득력: ${evalData.persuasion_score}/10</div>
+                            <div class="text-blue-600 mt-1">💡 피드백: ${evalData.feedback}</div>
+                        </div>` : ''}
+                    </div>`;
+            }
+            div.innerHTML = content;
+            chatBox.appendChild(div);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        function updateHistoryBoards(uHistory, aHistory) {
+            if(!uHistory || !aHistory) return;
+
+            const uList = document.getElementById('user-history-list');
+            const aList = document.getElementById('ai-history-list');
+            
+            document.getElementById('user-empty')?.remove();
+            document.getElementById('ai-empty')?.remove();
+
+            uList.innerHTML = uHistory.map(item => `
+                <div class="bg-blue-50 text-blue-800 p-3 rounded-xl border border-blue-100">${item}</div>
+            `).reverse().join('');
+
+            aList.innerHTML = aHistory.map(item => `
+                <div class="bg-red-50 text-red-800 p-3 rounded-xl border border-red-100">${item}</div>
+            `).reverse().join('');
+
+            document.getElementById('user-count').innerText = uHistory.length;
+            document.getElementById('ai-count').innerText = aHistory.length;
+        }
+    </script>
+</body>
+</html>
