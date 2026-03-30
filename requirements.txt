@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+sqlalchemy
+google-genai
+groq
+cohere
+python-dotenv
+pydantic
