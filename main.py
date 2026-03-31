@@ -64,14 +64,19 @@ async def start_debate(data: DebateRequest, db: Session = Depends(get_db)):
     )
     result["timestamp"] = datetime.utcnow().isoformat() + "Z"
     return result
+# (위쪽 코드는 그대로 둡니다)
+
+# 💡 평가/리셋용 데이터 규격 추가 (방 번호만 받음)
+class SessionRequest(BaseModel):
+    session_id: str = "default"
 
 @app.post("/api/v1/debate/evaluate")
-async def evaluate_debate(db: Session = Depends(get_db)):
-    print(f"\n[서버 알림] 🏁 코히어 심판 모드 가동! 전체 대화 분석 중...")
-    result = await run_evaluation_pipeline(db, "default")
+async def evaluate_debate(req: SessionRequest, db: Session = Depends(get_db)):
+    print(f"\n[서버 알림] 🏁 {req.session_id} 방 코히어 심판 모드 가동!")
+    result = await run_evaluation_pipeline(db, req.session_id)
     return result
 
 @app.post("/api/v1/debate/reset")
-async def reset_debate_memory(db: Session = Depends(get_db)):
-    reset_memory(db, "default")
-    return {"status": "success", "message": "서버 메모리가 초기화되었습니다."}
+async def reset_debate_memory(req: SessionRequest, db: Session = Depends(get_db)):
+    reset_memory(db, req.session_id)
+    return {"status": "success", "message": f"[{req.session_id}] 방 서버 메모리가 초기화되었습니다."}
