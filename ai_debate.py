@@ -198,23 +198,36 @@ async def run_debate_pipeline(user_claim, model_type, personality, attitude, atm
         raw_response = "{}"
         used_tokens = 0
 
-    result = extract_json(raw_response)
-    if result:
-        result['ai_rebuttal'] = sanitize_rebuttal(result.get('ai_rebuttal', ''))
-        model_token_usage[model_type] += used_tokens
+        # ... (생략) ...
+        result = extract_json(raw_response)
+        if result:
+            result['ai_rebuttal'] = sanitize_rebuttal(result.get('ai_rebuttal', ''))
+            model_token_usage[model_type] += used_tokens
 
-        user_msg = Message(session_id=db_session.id, role="user", content=user_claim,
-                           summary=result.get('user_summary', ''))
-        ai_msg = Message(session_id=db_session.id, role="ai", content=result.get('ai_rebuttal', ''),
-                         summary=result.get('ai_summary', ''))
+            user_msg = Message(session_id=db_session.id, role="user", content=user_claim,
+                               summary=result.get('user_summary', ''))
+            ai_msg = Message(session_id=db_session.id, role="ai", content=result.get('ai_rebuttal', ''),
+                             summary=result.get('ai_summary', ''))
 
-        db.add(user_msg)
-        db.add(ai_msg)
-        db.commit()
+            db.add(user_msg)
+            db.add(ai_msg)
+            db.commit()
 
-        return {**result, "total_tokens": model_token_usage[model_type]}
+            # 💡 [여기서부터 추가/수정!] DB에서 요약본만 싹 모아서 화면 양옆 패널로 쏴줍니다.
+            all_messages = db.query(Message).filter(Message.session_id == db_session.id).order_by(
+                Message.id.asc()).all()
 
-    return {"ai_rebuttal": "통신 에러", "total_tokens": 0}
+            user_history_list = [msg.summary for msg in all_messages if msg.role == "user" and msg.summary]
+            ai_history_list = [msg.summary for msg in all_messages if msg.role == "ai" and msg.summary]
+
+            return {
+                **result,
+                "user_history": user_history_list,
+                "ai_history": ai_history_list,
+                "total_tokens": model_token_usage[model_type]
+            }
+
+        return {"ai_rebuttal": "통신 에러", "total_tokens": 0}
 
 
 # ==========================================
