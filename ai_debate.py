@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from dotenv import load_dotenv
 
 # 각 LLM 라이브러리
@@ -14,7 +15,7 @@ from database import DebateSession, Message
 load_dotenv()
 
 # ==========================================
-# 💡 [API 키 세팅]
+# 💡 [API 키 세팅] (하드코딩 방지 유지!)
 # ==========================================
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -67,7 +68,7 @@ atmosphere_guide = {
 }
 
 # ==========================================
-# 💡 [4. 코히어 및 유틸리티 함수]
+# 💡 [4. 코히어 및 유틸리티 함수 (팀원 개선 로직 적용)]
 # ==========================================
 DYNAMIC_COHERE_MODEL = None
 
@@ -75,18 +76,20 @@ DYNAMIC_COHERE_MODEL = None
 def get_best_cohere_model():
     global DYNAMIC_COHERE_MODEL
     if DYNAMIC_COHERE_MODEL: return DYNAMIC_COHERE_MODEL
-    if not cohere_client: return "c4ai-aya-expanse-32b"
+    if not cohere_client: return "command-r-08-2024"
     try:
-        models = [m.name for m in cohere_client.models.list().models if 'chat' in m.endpoints]
+        models_data = cohere_client.models.list().models
+        models = [m.name for m in models_data if 'chat' in m.endpoints]
         priority = ["command-r-08-2024", "c4ai-aya-expanse-8b", "c4ai-aya-expanse-32b"]
         for p in priority:
             if p in models:
                 DYNAMIC_COHERE_MODEL = p
                 return DYNAMIC_COHERE_MODEL
-        DYNAMIC_COHERE_MODEL = models
+        # 팀원 수정: 리스트 자체가 아닌 첫 번째 항목 반환으로 버그 수정
+        DYNAMIC_COHERE_MODEL = models[0] if models else "command-r-08-2024"
         return DYNAMIC_COHERE_MODEL
     except:
-        return "c4ai-aya-expanse-32b"
+        return "command-r-08-2024"
 
 
 def extract_json(text):
@@ -100,22 +103,19 @@ def extract_json(text):
         return None
 
 
-PROMPT_LEAK_KEYWORDS = [
-    "당신은 최고 수준", "한국인 토론 전문가", "성격 및 말투", "핵심 가치관",
-    "핵심 절대 규칙", "JSON 형식으로만", "반드시 JSON", "시스템 파괴",
-    "요약본 히스토리", "사용자의 새로운 주장", "ai_rebuttal", "user_summary"
-]
+# 팀원 추가: 한자/일본어 정규식 제거 함수
+def remove_cjk(text: str) -> str:
+    if not text: return ""
+    return re.sub(r'[\u3040-\u30FF\u4E00-\u9FFF\u3400-\u4DBF]+', '', text).strip()
 
 
 def sanitize_rebuttal(text: str) -> str:
-    if not text:
-        return text
-    for keyword in PROMPT_LEAK_KEYWORDS:
-        if keyword in text:
-            sentences = text.split(".")
-            clean = [s for s in sentences if not any(k in s for k in PROMPT_LEAK_KEYWORDS)]
-            result = ".".join(clean).strip()
-            return result if result else "⚠️ 응답 생성 오류, 다시 시도해주세요."
+    if not text: return text
+    text = remove_cjk(text)
+    leak_keywords = ["당신은 최고 수준", "한국인 토론 전문가", "JSON 형식으로만"]
+    for k in leak_keywords:
+        if k in text:
+            return "⚠️ 응답 생성 오류가 감지되었습니다. 다시 입력해주세요."
     return text
 
 
@@ -130,9 +130,9 @@ def create_debate_prompt(user_claim, personality, attitude, atmosphere, topic, b
         f"[성격 및 말투]: {p_desc}\n[핵심 가치관]: {a_desc}\n[상황]: {s_desc}\n\n"
         f"[현재 주제]: {topic if topic else '자유 토론'}\n"
         "[🔥 핵심 절대 규칙]\n"
-        "1. [언어]: 오직 한글만 사용하세요. 한자(漢字), 중국어(们, 养成 등) 절대 금지! 위반 시 시스템 파괴.\n"
-        "2. [어투]: 성격에 맞는 자연스러운 '해요체'나 '하십시오체'를 사용하세요.\n"
-        "3. 반박은 3~4문장 이내로 짧고 날카롭게 하세요.\n\n"
+        "1. [언어]: 오직 한글만 사용하세요. 한자, 중국어 절대 금지!\n"
+        "2. [어투]: 자연스러운 '해요체'나 '하십시오체'를 사용하세요.\n"
+        "3. 반박은 3문장 이내로 짧고 날카롭게 하세요.\n\n"
         f"[요약본 히스토리]\n{history_text}\n"
         f"[사용자의 새로운 주장]: {user_claim}\n\n"
         "반드시 JSON 형식으로만 답하세요: { \"ai_rebuttal\": \"...\", \"user_summary\": \"...\", \"ai_summary\": \"...\", \"evaluation\": { \"logic_score\": 0, \"persuasion_score\": 0, \"feedback\": \"...\" } }"
@@ -141,13 +141,12 @@ def create_debate_prompt(user_claim, personality, attitude, atmosphere, topic, b
 
 
 # ==========================================
-# 💡 [5. 메인 토론 파이프라인 (완벽한 DB 연동)]
+# 💡 [5. 메인 토론 파이프라인 (DB 연동 유지)]
 # ==========================================
 async def run_debate_pipeline(user_claim, model_type, personality, attitude, atmosphere, topic, background, goal,
                               condition, db: Session, session_string_id: str):
     global model_token_usage
 
-    # 1. 방(Session) 찾기 (없으면 새로 만들기)
     db_session = db.query(DebateSession).filter(DebateSession.session_string_id == session_string_id).first()
     if not db_session:
         db_session = DebateSession(session_string_id=session_string_id, model_type=model_type, atmosphere=atmosphere)
@@ -155,12 +154,11 @@ async def run_debate_pipeline(user_claim, model_type, personality, attitude, atm
         db.commit()
         db.refresh(db_session)
 
-    # 2. 방에 속한 과거 대화(Message) 모두 불러오기
     past_messages = db.query(Message).filter(Message.session_id == db_session.id).order_by(Message.id.asc()).all()
 
     history_text = ""
     for msg in past_messages:
-        role_name = "사용자" if msg.role == "user" else "AI"
+        role_name = "유저" if msg.role == "user" else "AI"
         history_text += f"[{role_name}]: {msg.content}\n"
 
     full_prompt = create_debate_prompt(user_claim, personality, attitude, atmosphere, topic, background, goal,
@@ -175,9 +173,11 @@ async def run_debate_pipeline(user_claim, model_type, personality, attitude, atm
                 temperature=0.4
             )
             raw1 = res1.choices[0].message.content
+
+            # 팀원 추가: 한국어 보존 및 한자 변경 프롬프트 개선
             res2 = groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": f"아래 JSON에서 한자를 한글로 번역하세요:\n{raw1}"}],
+                messages=[{"role": "user", "content": f"아래 JSON에서 한국어는 그대로 두고 한자만 한글로 바꾸세요:\n{raw1}"}],
                 response_format={"type": "json_object"},
                 temperature=0.0
             )
@@ -196,13 +196,13 @@ async def run_debate_pipeline(user_claim, model_type, personality, attitude, atm
     except Exception as e:
         print(f"Error: {e}")
         raw_response = "{}"
+        used_tokens = 0
 
     result = extract_json(raw_response)
     if result:
         result['ai_rebuttal'] = sanitize_rebuttal(result.get('ai_rebuttal', ''))
         model_token_usage[model_type] += used_tokens
 
-        # 3. 새로운 대화를 DB(Message)에 2개(User 1개, AI 1개)로 나눠서 예쁘게 저장
         user_msg = Message(session_id=db_session.id, role="user", content=user_claim,
                            summary=result.get('user_summary', ''))
         ai_msg = Message(session_id=db_session.id, role="ai", content=result.get('ai_rebuttal', ''),
@@ -218,12 +218,13 @@ async def run_debate_pipeline(user_claim, model_type, personality, attitude, atm
 
 
 # ==========================================
-# 💡 [6. 심판 평가 파이프라인]
+# 💡 [6. 심판 평가 파이프라인 (팀원 로직 + DB 적용)]
 # ==========================================
 async def run_evaluation_pipeline(db: Session, session_string_id: str):
     db_session = db.query(DebateSession).filter(DebateSession.session_string_id == session_string_id).first()
     if not db_session:
-        return {"score": 0, "feedback": "대화 기록이 없습니다."}
+        return {"score": 0, "logic_score": 0, "persuasion_score": 0, "strengths": ["데이터 없음"],
+                "weaknesses": ["대화 기록 없음"], "feedback": "토론 기록이 존재하지 않습니다."}
 
     past_messages = db.query(Message).filter(Message.session_id == db_session.id).order_by(Message.id.asc()).all()
 
@@ -232,13 +233,19 @@ async def run_evaluation_pipeline(db: Session, session_string_id: str):
         role_prefix = "[나]" if msg.role == "user" else "[AI]"
         chat_history += f"{role_prefix}: {msg.content}\n"
 
+    # 팀원 추가: 대화 내용이 빈 값일 경우 프론트엔드 에러 방지
+    if not chat_history.strip():
+        return {"score": 0, "logic_score": 0, "persuasion_score": 0, "strengths": ["데이터 없음"],
+                "weaknesses": ["대화 기록 없음"], "feedback": "토론 기록이 존재하지 않습니다."}
+
     live_model = get_best_cohere_model()
+    # 팀원 추가: 프론트엔드 UI용 필수 키값 명시
     prompt = (
-        f"당신은 토론 심판입니다. 아래 대화를 분석해 사용자 평가를 JSON 형식으로만 반환하세요.\n"
-        f"반드시 아래 키를 정확히 사용하세요 (다른 키 금지):\n"
-        f'{{"score": 0~100 정수, "logic_score": 0~100 정수, "persuasion_score": 0~100 정수, '
-        f'"strengths": ["장점1", "장점2"], "weaknesses": ["단점1", "단점2"], "feedback": "상세 피드백 문자열"}}\n\n'
-        f"[대화 기록]\n{chat_history}"
+        f"당신은 냉철한 토론 심판입니다. 아래 대화를 분석해 JSON으로만 답하세요.\n"
+        f"반드시 다음 구조를 지키세요:\n"
+        f'{{"score": 0~100점, "logic_score": 0~100점, "persuasion_score": 0~100점, '
+        f'"strengths": ["장점1", "장점2"], "weaknesses": ["단점1", "단점2"], "feedback": "상세평"}}'
+        f"\n\n[대화 기록]\n{chat_history}"
     )
 
     try:
@@ -251,15 +258,14 @@ async def run_evaluation_pipeline(db: Session, session_string_id: str):
         return {"score": 0, "feedback": "심판 호출 실패"}
     except Exception as e:
         print(f"Eval Error: {e}")
-        return {"score": 0, "feedback": "에러 발생"}
+        return {"score": 0, "feedback": f"에러 발생: {str(e)}"}
 
 
 # ==========================================
-# 💡 [7. 대화 초기화 (방 유지, 대화만 삭제)]
+# 💡 [7. 대화 초기화]
 # ==========================================
 def reset_memory(db: Session, session_string_id: str):
     db_session = db.query(DebateSession).filter(DebateSession.session_string_id == session_string_id).first()
     if db_session:
-        # 방은 남겨두고, 안에 있는 Message(대화)들만 싹 비웁니다.
         db.query(Message).filter(Message.session_id == db_session.id).delete()
         db.commit()
