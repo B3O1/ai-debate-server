@@ -8,7 +8,36 @@ from datetime import datetime
 # 💡 DB 및 평가/실행 함수 불러오기
 from database import SessionLocal, engine, Base
 from ai_debate import run_debate_pipeline, reset_memory, run_evaluation_pipeline
+from typing import Optional, List # 💡 맨 위 import 부분에 List가 없다면 꼭 추가해주세요!
 
+# ... (기존 DebateRequest, SessionRequest 코드) ...
+
+# ==========================================
+# 💡 [새로 추가] 스웨거 명세용 응답(Response) 모델
+# ==========================================
+class ChatEvaluation(BaseModel):
+    logic_score: int
+    persuasion_score: int
+    feedback: str
+
+class ChatResponse(BaseModel):
+    ai_rebuttal: str
+    user_summary: str
+    ai_summary: str
+    evaluation: ChatEvaluation
+    user_history: List[str]
+    ai_history: List[str]
+    total_tokens: int
+    timestamp: str
+
+class EvaluateResponse(BaseModel):
+    score: int
+    logic_score: int
+    persuasion_score: int
+    strengths: List[str]
+    weaknesses: List[str]
+    feedback: str
+    raw_chat: str
 app = FastAPI()
 
 # 시작 시 DB 테이블 자동 생성
@@ -44,7 +73,7 @@ class DebateRequest(BaseModel):
     goal: Optional[str] = None
     condition: Optional[str] = None
 
-@app.post("/api/v1/debate/chat")
+@app.post("/api/v1/debate/chat", response_model=ChatResponse)
 async def start_debate(data: DebateRequest, db: Session = Depends(get_db)):
     print(f"\n[서버 알림] 요청 도착! (주제: {data.topic} / 성격: {data.personality} / 태도: {data.attitude})")
 
@@ -70,7 +99,7 @@ async def start_debate(data: DebateRequest, db: Session = Depends(get_db)):
 class SessionRequest(BaseModel):
     session_id: str = "default"
 
-@app.post("/api/v1/debate/evaluate")
+@app.post("/api/v1/debate/evaluate", response_model=EvaluateResponse)
 async def evaluate_debate(req: SessionRequest, db: Session = Depends(get_db)):
     print(f"\n[서버 알림] 🏁 {req.session_id} 방 코히어 심판 모드 가동!")
     result = await run_evaluation_pipeline(db, req.session_id)
