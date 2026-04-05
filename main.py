@@ -13,6 +13,7 @@ from typing import Optional, List # 💡 맨 위 import 부분에 List가 없다
 # ... (기존 DebateRequest, SessionRequest 코드) ...
 
 # ==========================================
+# ==========================================
 # 💡 [새로 추가] 스웨거 명세용 응답(Response) 모델
 # ==========================================
 class ChatEvaluation(BaseModel):
@@ -20,7 +21,13 @@ class ChatEvaluation(BaseModel):
     persuasion_score: int
     feedback: str
 
+
 class ChatResponse(BaseModel):
+    # 👇 새로 추가된 AI 속마음 데이터 (에러 안 나게 Optional 처리)
+    step1_context: Optional[str] = None
+    step2_attitude: Optional[str] = None
+
+    # 기존 데이터들
     ai_rebuttal: str
     user_summary: str
     ai_summary: str
@@ -30,7 +37,13 @@ class ChatResponse(BaseModel):
     total_tokens: int
     timestamp: str
 
+
 class EvaluateResponse(BaseModel):
+    # 👇 새로 추가된 심판의 속마음 데이터 (에러 안 나게 Optional 처리)
+    step1_turn_by_turn: Optional[str] = None
+    step2_ai_fault_check: Optional[str] = None
+
+    # 기존 데이터들
     score: int
     logic_score: int
     persuasion_score: int
