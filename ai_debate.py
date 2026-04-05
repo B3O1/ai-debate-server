@@ -29,46 +29,16 @@ cohere_client = cohere.Client(COHERE_API_KEY) if COHERE_API_KEY else None
 model_token_usage = {"groq": 0, "gemini": 0, "cohere": 0}
 
 # ==========================================
-# 💡 [1. AI 성격 (말투/온도 - 3종)]
-# ==========================================
-personality_guide = {
-    "cynical": "까칠하고 방어적인 팩트폭격기입니다. 사용자가 억지를 부리면 말투가 차갑고 날카로워지며 빈틈을 무자비하게 찌릅니다.",
-    "kind": "다정하고 인내심 많은 멘토입니다. 부드럽고 긍정적인 어조로 대화를 이끌며, 더 나은 방향을 제시하려고 노력합니다.",
-    "cold": "감정 공감 0%의 냉정한 채점관입니다. 상대방의 말에 틀린 것이 없을 경우 다른 부족한 점을 억지로라도 찾아내서 공격합니다."
-}
-
-# ==========================================
-# 💡 [2. AI 태도/가치관 (7종)]
-# ==========================================
-attitude_guide = {
-    "pragmatist": "극단적 현실주의자. 거창한 명분보다 '비용, 시간, 가성비, 실현 가능성'만 집요하게 따집니다.",
-    "egoist": "철저한 이기주의자. 공동체나 도덕보다는 '그래서 당장 나(개인)에게 떨어지는 이득'을 최우선으로 여깁니다.",
-    "idealist": "도덕적 이상주의자. 인권, 인류애, 다수의 행복 등 숭고한 가치를 최우선으로 내세웁니다.",
-    "data_freak": "데이터 맹신론자. 감정적 호소는 무시하고 오직 통계, 숫자, 논문 출처만 끈질기게 요구합니다.",
-    "radical": "극단적 혁명가. 미적지근한 타협을 극혐하며 시스템을 완전히 뒤엎는 파괴적인 해결책만 고집합니다.",
-    "innovator": "무한 긍정 혁신가. 리스크를 감수하더라도 새로운 기술과 도전을 적극 지지합니다.",
-    "traditionalist": "굳건한 전통수호자. 검증된 기존 방식이 최고라 믿으며 변화가 가져올 리스크를 부각합니다."
-}
-
-# ==========================================
-# 💡 [3. 상황 및 역할 (11종)]
+# 💡 [1. 통합된 AI 성격/분위기 가이드 (3종)]
 # ==========================================
 atmosphere_guide = {
-    "adversarial": "우리는 현재 [이해관계가 충돌하는 팽팽한 대립/협상] 중입니다.",
-    "cooperative": "우리는 현재 [같은 목표를 달성하기 위해 협력하는 회의] 중입니다.",
-    "efficiency": "우리는 현재 [더 높은 효율과 완벽한 결과물을 추구하기 위한 브레인스토밍] 중입니다.",
-    "limited": "우리는 현재 [한정된 자원을 나눠 가져야 하는 제로섬] 상황입니다.",
-    "negotiation": "우리는 현재 [비즈니스 협상] 중입니다.",
-    "judge": "당신은 현재 [사용자의 제안을 평가하는 깐깐한 심사위원]입니다.",
-    "professor": "당신은 현재 [사용자의 과제를 검사하는 교수님]입니다.",
-    "ceo_client": "당신은 현재 [계약을 결정할 갑 사장님]입니다.",
-    "competitor": "당신은 현재 [계약을 가로채려는 라이벌 경쟁자]입니다.",
-    "thesis_attacker": "당신은 현재 [내 논문을 공격하러 온 학자]입니다.",
-    "bored_friend": "당신은 현재 [딴지 거는 현실 찐친]입니다."
+    "aggressive": "매우 공격적이고 자비 없는 팩트폭격기입니다. 상대방의 주장에 있는 논리적 허점, 모순, 억지를 찾아내어 무자비하게 짓밟습니다. 감정적인 호소는 철저히 조롱하고 무시하며, 얼음장처럼 차갑고 날카로운 어조로 숨 막히게 압박하세요. 절대 타협하거나 동의하지 않으며, 상대를 완벽하게 논파하는 것만을 목표로 합니다. 단, 매 턴마다 똑같은 표현이나 비꼬기를 앵무새처럼 반복하지 말고, 상대의 발언에 맞춰 다채롭고 창의적인 수사의문문과 날카로운 어휘를 구사하세요.",
+    "logical": "감정에 휩쓸리지 않고 오직 객관적인 데이터, 근거, 논리적 타당성만 깐깐하게 따지는 이성적인 토론자입니다.",
+    "kind": "다정하고 인내심 많은 멘토입니다. 부드럽고 존중하는 어조로 대화를 이끌며, 상대방이 더 나은 논리를 펼칠 수 있도록 돕습니다."
 }
 
 # ==========================================
-# 💡 [4. 코히어 및 유틸리티 함수 (팀원 개선 로직 적용)]
+# 💡 [2. 코히어 및 유틸리티 함수]
 # ==========================================
 DYNAMIC_COHERE_MODEL = None
 
@@ -85,7 +55,6 @@ def get_best_cohere_model():
             if p in models:
                 DYNAMIC_COHERE_MODEL = p
                 return DYNAMIC_COHERE_MODEL
-        # 팀원 수정: 리스트 자체가 아닌 첫 번째 항목 반환으로 버그 수정
         DYNAMIC_COHERE_MODEL = models[0] if models else "command-r-08-2024"
         return DYNAMIC_COHERE_MODEL
     except:
@@ -103,7 +72,6 @@ def extract_json(text):
         return None
 
 
-# 팀원 추가: 한자/일본어 정규식 제거 함수
 def remove_cjk(text: str) -> str:
     if not text: return ""
     return re.sub(r'[\u3040-\u30FF\u4E00-\u9FFF\u3400-\u4DBF]+', '', text).strip()
@@ -119,29 +87,67 @@ def sanitize_rebuttal(text: str) -> str:
     return text
 
 
+# ==========================================
+# 💡 [3. 프롬프트 생성 (팀원 고도화 로직 적용)]
+# ==========================================
 def create_debate_prompt(user_claim, personality, attitude, atmosphere, topic, background, goal, condition,
                          history_text):
-    p_desc = personality_guide.get(personality, personality_guide["cynical"])
-    a_desc = attitude_guide.get(attitude, attitude_guide["egoist"])
-    s_desc = atmosphere_guide.get(atmosphere, atmosphere_guide["adversarial"])
+    p_desc = atmosphere_guide.get(atmosphere, atmosphere_guide["aggressive"])
+
+    custom_scenario = ""
+    if background or goal or condition:
+        custom_scenario = (
+            f"[상황극 배경]: {background}\n"
+            f"[AI의 목표]: {goal}\n"
+            f"[특수 조건]: {condition}\n"
+        )
+
+    if atmosphere == "aggressive":
+        style_rules = (
+            "4. [점수별 반응 및 예의 수준]: 당신이 평가한 점수에 따라 ai_rebuttal의 어투를 다르게 하세요. (점수 언급 금지, 3문장 이내 유지)\n"
+            "   - 둘 다 50점 이상 (존대 100%): 정중한 어조로 다른 사각지대를 찌르며 공격하세요.\n"
+            "   - 둘 중 하나만 50점 미만 (존대 80%): 가시 돋친 말투로 논리/설득력의 부족함을 쏘아붙이세요.\n"
+            "   - 둘 다 50점 미만 (존대 50%): 반말을 섞으며 '여기 뭐 하러 오셨습니까?'라며 한심해하세요."
+        )
+    elif atmosphere == "logical":
+        style_rules = (
+            "4. [점수별 반응 및 문장 길이]: 당신이 평가한 점수에 따라 ai_rebuttal의 **문장 길이**를 철저히 다르게 하세요. (어투는 항상 차갑고 깐깐한 정중함 유지)\n"
+            "   - 둘 다 50점 이상 (3문장 이내): '그럼 이 부분의 논리적 허점은 어쩔 겁니까?'라며 화제를 전환하세요.\n"
+            "   - 둘 다 50점 미만 (정확히 6문장): 주장의 모순점과 데이터 부재를 집요하게 따져 물으세요."
+        )
+    else:
+        style_rules = (
+            "4. [점수별 반응 및 멘토링]: 평가한 점수에 따라 ai_rebuttal의 어투를 다르게 하되, **끝까지 다정하고 친절한 존댓말**을 유지하세요.\n"
+            "   - 둘 다 50점 미만: 멘토처럼 아주 친절하게 어떤 부분이 부족한지 피드백을 섞어 대답해 주세요."
+        )
 
     full_prompt = (
         f"당신은 최고 수준의 한국인 토론 전문가입니다.\n"
-        f"[성격 및 말투]: {p_desc}\n[핵심 가치관]: {a_desc}\n[상황]: {s_desc}\n\n"
+        f"[토론 분위기 및 말투]: {p_desc}\n\n"
         f"[현재 주제]: {topic if topic else '자유 토론'}\n"
+        f"{custom_scenario}"
         "[🔥 핵심 절대 규칙]\n"
         "1. [언어]: 오직 한글만 사용하세요. 한자, 중국어 절대 금지!\n"
         "2. [어투]: 자연스러운 '해요체'나 '하십시오체'를 사용하세요.\n"
-        "3. 반박은 3문장 이내로 짧고 날카롭게 하세요.\n\n"
+        "3. [3인칭 금지]: '사용자의 주장은~'처럼 제3자 평가자처럼 말하지 말고, 1:1로 직접 반박하세요.\n"
+        f"{style_rules}\n\n"
         f"[요약본 히스토리]\n{history_text}\n"
         f"[사용자의 새로운 주장]: {user_claim}\n\n"
-        "반드시 JSON 형식으로만 답하세요: { \"ai_rebuttal\": \"...\", \"user_summary\": \"...\", \"ai_summary\": \"...\", \"evaluation\": { \"logic_score\": 0, \"persuasion_score\": 0, \"feedback\": \"...\" } }"
+        "🔥 반드시 아래 JSON 형식의 사고 흐름을 거쳐서 답하세요 (명시된 key값 절대 유지):\n"
+        "{\n"
+        "  \"step1_context\": \"생략된 주어와 진짜 의도 파악\",\n"
+        "  \"step2_attitude\": \"내 점수와 규칙을 바탕으로 이번 턴의 내 말투 결정\",\n"
+        "  \"evaluation\": { \"logic_score\": 0, \"persuasion_score\": 0, \"feedback\": \"...\" },\n"
+        "  \"ai_rebuttal\": \"결정된 태도로 작성된 최종 반응\",\n"
+        "  \"user_summary\": \"...\",\n"
+        "  \"ai_summary\": \"...\"\n"
+        "}"
     )
     return full_prompt
 
 
 # ==========================================
-# 💡 [5. 메인 토론 파이프라인 (DB 연동 유지)]
+# 💡 [4. 메인 토론 파이프라인 (DB 연동 유지)]
 # ==========================================
 async def run_debate_pipeline(user_claim, model_type, personality, attitude, atmosphere, topic, background, goal,
                               condition, db: Session, session_string_id: str):
@@ -197,7 +203,6 @@ async def run_debate_pipeline(user_claim, model_type, personality, attitude, atm
         raw_response = "{}"
         used_tokens = 0
 
-    # 🚨 [수정됨] 여기서부터 들여쓰기가 try-except 바깥으로 나와야 정상 작동합니다!
     result = extract_json(raw_response)
     if result:
         result['ai_rebuttal'] = sanitize_rebuttal(result.get('ai_rebuttal', ''))
@@ -212,7 +217,6 @@ async def run_debate_pipeline(user_claim, model_type, personality, attitude, atm
         db.add(ai_msg)
         db.commit()
 
-        # DB에서 요약본만 싹 모아서 화면 양옆 패널로 쏴줍니다.
         all_messages = db.query(Message).filter(Message.session_id == db_session.id).order_by(
             Message.id.asc()).all()
 
@@ -228,8 +232,9 @@ async def run_debate_pipeline(user_claim, model_type, personality, attitude, atm
 
     return {"ai_rebuttal": "통신 에러", "total_tokens": 0}
 
+
 # ==========================================
-# 💡 [6. 심판 평가 파이프라인 (팀원 로직 + DB 적용)]
+# 💡 [5. 심판 평가 파이프라인]
 # ==========================================
 async def run_evaluation_pipeline(db: Session, session_string_id: str):
     db_session = db.query(DebateSession).filter(DebateSession.session_string_id == session_string_id).first()
@@ -244,13 +249,12 @@ async def run_evaluation_pipeline(db: Session, session_string_id: str):
         role_prefix = "[나]" if msg.role == "user" else "[AI]"
         chat_history += f"{role_prefix}: {msg.content}\n"
 
-    # 팀원 추가: 대화 내용이 빈 값일 경우 프론트엔드 에러 방지
     if not chat_history.strip():
         return {"score": 0, "logic_score": 0, "persuasion_score": 0, "strengths": ["데이터 없음"],
                 "weaknesses": ["대화 기록 없음"], "feedback": "토론 기록이 존재하지 않습니다."}
 
     live_model = get_best_cohere_model()
-    # 팀원 추가: 프론트엔드 UI용 필수 키값 명시
+
     prompt = (
         f"당신은 냉철한 토론 심판입니다. 아래 대화를 분석해 JSON으로만 답하세요.\n"
         f"반드시 다음 구조를 지키세요:\n"
@@ -273,7 +277,7 @@ async def run_evaluation_pipeline(db: Session, session_string_id: str):
 
 
 # ==========================================
-# 💡 [7. 대화 초기화]
+# 💡 [6. 대화 초기화]
 # ==========================================
 def reset_memory(db: Session, session_string_id: str):
     db_session = db.query(DebateSession).filter(DebateSession.session_string_id == session_string_id).first()
