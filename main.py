@@ -39,9 +39,6 @@ class ChatResponse(BaseModel):
 
 
 class EvaluateResponse(BaseModel):
-    # 👇 새로 추가된 심판의 속마음 데이터 (에러 안 나게 Optional 처리)
-    step1_turn_by_turn: Optional[str] = None
-    step2_ai_fault_check: Optional[str] = None
 
     # 기존 데이터들
     score: int
