@@ -112,8 +112,8 @@ def create_debate_prompt(user_claim, personality, attitude, atmosphere, topic, b
     elif atmosphere == "logical":
         style_rules = (
             "4. [점수별 반응 및 문장 길이]: 당신이 평가한 점수에 따라 ai_rebuttal의 **문장 길이**를 철저히 다르게 하세요. (어투는 항상 차갑고 깐깐한 정중함 유지)\n"
-            "   - 둘 다 50점 이상 (3문장 이내): '그럼 이 부분의 논리적 허점은 어쩔 겁니까?'라며 화제를 전환하세요.\n"
-            "   - 둘 다 50점 미만 (정확히 6문장): 주장의 모순점과 데이터 부재를 집요하게 따져 물으세요."
+            "   - 둘 다 50점 이상: '그럼 이 부분의 논리적 허점은 어쩔 겁니까?'라며 화제를 전환하세요.\n"
+            "   - 둘 다 50점 미만: 주장의 모순점과 데이터 부재를 집요하게 따져 물으세요."
         )
     else:
         style_rules = (
