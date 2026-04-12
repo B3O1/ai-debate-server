@@ -9,22 +9,30 @@ import google.generativeai as genai
 import cohere
 from sqlalchemy.orm import Session
 
-# 💡 동환 님의 실제 database.py 모델들을 완벽하게 불러옵니다!
+# DB 모델 불러오기
 from database import DebateSession, Message
 
 load_dotenv()
 
 # ==========================================
-# 💡 [API 키 세팅] (하드코딩 방지 유지!)
+# 💡 [API 키 세팅 및 스위칭 로직]
 # ==========================================
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-COHERE_API_KEY = os.getenv("COHERE_API_KEY")
+# 여러 개의 Groq 키를 리스트로 모아둡니다. (.env에 GROQ_API_KEY_2, 3 등을 추가하세요)
+GROQ_KEYS = [
+    os.getenv("GROQ_API_KEY"),
+    os.getenv("GROQ_API_KEY_2"),
+    os.getenv("GROQ_API_KEY_3"),
+    os.getenv("GROQ_API_KEY_4")
+]
+# 값이 있는 키만 필터링해서 클라이언트 리스트 생성
+GROQ_KEYS = [k for k in GROQ_KEYS if k]
+groq_clients = [groq.Groq(api_key=k) for k in GROQ_KEYS]
 
-groq_client = groq.Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-cohere_client = cohere.Client(COHERE_API_KEY) if COHERE_API_KEY else None
+current_groq_index = 0  # 현재 사용 중인 Groq 키 인덱스
+
+if os.getenv("GEMINI_API_KEY"):
+    genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+cohere_client = cohere.Client(os.getenv("COHERE_API_KEY")) if os.getenv("COHERE_API_KEY") else None
 
 model_token_usage = {"groq": 0, "gemini": 0, "cohere": 0}
 
@@ -88,19 +96,11 @@ def sanitize_rebuttal(text: str) -> str:
 
 
 # ==========================================
-# 💡 [3. 프롬프트 생성 (팀원 고도화 로직 적용)]
+# 💡 [3. 프롬프트 생성 (동환 님의 깔끔한 버전 유지)]
 # ==========================================
 def create_debate_prompt(user_claim, personality, attitude, atmosphere, topic, background, goal, condition,
                          history_text):
     p_desc = atmosphere_guide.get(atmosphere, atmosphere_guide["aggressive"])
-
-    custom_scenario = ""
-    if background or goal or condition:
-        custom_scenario = (
-            f"[상황극 배경]: {background}\n"
-            f"[AI의 목표]: {goal}\n"
-            f"[특수 조건]: {condition}\n"
-        )
 
     if atmosphere == "aggressive":
         style_rules = (
@@ -112,8 +112,8 @@ def create_debate_prompt(user_claim, personality, attitude, atmosphere, topic, b
     elif atmosphere == "logical":
         style_rules = (
             "4. [점수별 반응 및 문장 길이]: 당신이 평가한 점수에 따라 ai_rebuttal의 **문장 길이**를 철저히 다르게 하세요. (어투는 항상 차갑고 깐깐한 정중함 유지)\n"
-            "   - 둘 다 50점 이상: '그럼 이 부분의 논리적 허점은 어쩔 겁니까?'라며 화제를 전환하세요.\n"
-            "   - 둘 다 50점 미만: 주장의 모순점과 데이터 부재를 집요하게 따져 물으세요."
+            "   - 둘 다 50점 이상 (3문장 이내): '그럼 이 부분의 논리적 허점은 어쩔 겁니까?'라며 화제를 전환하세요.\n"
+            "   - 둘 다 50점 미만 (3~4문장 이내): 주장의 모순점과 데이터 부재를 집요하게 따져 물으세요."
         )
     else:
         style_rules = (
@@ -125,7 +125,6 @@ def create_debate_prompt(user_claim, personality, attitude, atmosphere, topic, b
         f"당신은 최고 수준의 한국인 토론 전문가입니다.\n"
         f"[토론 분위기 및 말투]: {p_desc}\n\n"
         f"[현재 주제]: {topic if topic else '자유 토론'}\n"
-        f"{custom_scenario}"
         "[🔥 핵심 절대 규칙]\n"
         "1. [언어]: 오직 한글만 사용하세요. 한자, 중국어 절대 금지!\n"
         "2. [어투]: 자연스러운 '해요체'나 '하십시오체'를 사용하세요.\n"
@@ -147,11 +146,11 @@ def create_debate_prompt(user_claim, personality, attitude, atmosphere, topic, b
 
 
 # ==========================================
-# 💡 [4. 메인 토론 파이프라인 (DB 연동 유지)]
+# 💡 [4. 메인 토론 파이프라인 (Groq 스위칭 및 ERD 우회)]
 # ==========================================
 async def run_debate_pipeline(user_claim, model_type, personality, attitude, atmosphere, topic, background, goal,
                               condition, db: Session, session_string_id: str):
-    global model_token_usage
+    global model_token_usage, current_groq_index
 
     db_session = db.query(DebateSession).filter(DebateSession.session_string_id == session_string_id).first()
     if not db_session:
@@ -165,63 +164,93 @@ async def run_debate_pipeline(user_claim, model_type, personality, attitude, atm
     history_text = ""
     for msg in past_messages:
         role_name = "유저" if msg.role == "user" else "AI"
-        history_text += f"[{role_name}]: {msg.content}\n"
+        # AI 요약본에 붙여둔 점수( ||80||90 )가 있으면 앞부분 요약만 잘라서 역사에 넣습니다.
+        clean_summary = msg.summary.split("||")[0] if msg.summary else ""
+        history_text += f"[{role_name}]: {clean_summary}\n"
 
     full_prompt = create_debate_prompt(user_claim, personality, attitude, atmosphere, topic, background, goal,
                                        condition, history_text)
 
-    try:
-        if model_type == "groq" and groq_client:
-            res1 = groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": full_prompt}],
-                response_format={"type": "json_object"},
-                temperature=0.4
-            )
-            raw1 = res1.choices[0].message.content
+    raw_response = "{}"
+    used_tokens = 0
 
-            res2 = groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": f"아래 JSON에서 한국어는 그대로 두고 한자만 한글로 바꾸세요:\n{raw1}"}],
-                response_format={"type": "json_object"},
-                temperature=0.0
-            )
-            raw_response = res2.choices[0].message.content
-            used_tokens = res1.usage.total_tokens + res2.usage.total_tokens
+    try:
+        if model_type == "groq" and groq_clients:
+            success = False
+            # 💡 [핵심] 등록된 키 개수만큼 반복하며 시도 (에러 나면 다음 키로 스위칭)
+            for _ in range(len(groq_clients)):
+                try:
+                    client = groq_clients[current_groq_index]
+                    res1 = client.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=[{"role": "user", "content": full_prompt}],
+                        response_format={"type": "json_object"},
+                        temperature=0.4
+                    )
+                    raw1 = res1.choices[0].message.content
+
+                    res2 = client.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=[{"role": "user", "content": f"아래 JSON에서 한국어는 그대로 두고 한자만 한글로 바꾸세요:\n{raw1}"}],
+                        response_format={"type": "json_object"},
+                        temperature=0.0
+                    )
+                    raw_response = res2.choices[0].message.content
+                    used_tokens = res1.usage.total_tokens + res2.usage.total_tokens
+                    success = True
+                    break  # 성공 시 반복문 탈출!
+                except Exception as e:
+                    print(f"[경고] Groq API 에러 (Key Index {current_groq_index}): {e}")
+                    # 에러 시 다음 키로 이동 (예: 0 -> 1 -> 2 -> 3 -> 0)
+                    current_groq_index = (current_groq_index + 1) % len(groq_clients)
+
+            if not success:
+                raise Exception("등록된 모든 Groq 키가 한도 초과 또는 에러 상태입니다.")
 
         elif model_type == "cohere" and cohere_client:
             live_model = get_best_cohere_model()
             res = cohere_client.chat(model=live_model, message=full_prompt, temperature=0.7)
             raw_response = res.text
             used_tokens = len(raw_response) * 2
-        else:
-            raw_response = "{}"
-            used_tokens = 0
 
     except Exception as e:
-        print(f"Error: {e}")
-        raw_response = "{}"
-        used_tokens = 0
+        print(f"Pipeline Error: {e}")
+        # 💡 [500 에러 방지] 통신 에러 시 준성님이 요청한 예외 JSON 반환!
+        return {
+            "step1_context": "통신 지연",
+            "step2_attitude": "통신 지연",
+            "evaluation": {"logic_score": 0, "persuasion_score": 0, "feedback": "통신 지연"},
+            "ai_rebuttal": "⚠️ AI 서버 연결이 지연되었습니다. 방금 하신 말씀을 한 번 더 전송해 주세요!",
+            "user_summary": "",
+            "ai_summary": "",
+            "user_history": [],
+            "ai_history": [],
+            "total_tokens": 0
+        }
 
     result = extract_json(raw_response)
     if result:
         result['ai_rebuttal'] = sanitize_rebuttal(result.get('ai_rebuttal', ''))
         model_token_usage[model_type] += used_tokens
 
+        # 💡 [ERD 우회 핵심] DB 스키마를 건드리지 않고, summary 문자열 뒤에 점수를 숨겨서 저장합니다. ("요약||80||90")
+        eval_data = result.get('evaluation', {})
+        encoded_ai_summary = f"{result.get('ai_summary', '')}||{eval_data.get('logic_score', 0)}||{eval_data.get('persuasion_score', 0)}"
+
         user_msg = Message(session_id=db_session.id, role="user", content=user_claim,
                            summary=result.get('user_summary', ''))
         ai_msg = Message(session_id=db_session.id, role="ai", content=result.get('ai_rebuttal', ''),
-                         summary=result.get('ai_summary', ''))
+                         summary=encoded_ai_summary)
 
         db.add(user_msg)
         db.add(ai_msg)
         db.commit()
 
-        all_messages = db.query(Message).filter(Message.session_id == db_session.id).order_by(
-            Message.id.asc()).all()
+        all_messages = db.query(Message).filter(Message.session_id == db_session.id).order_by(Message.id.asc()).all()
 
+        # 프론트엔드로 보낼 때는 점수 부분(||80||90)을 잘라내고 순수 요약본만 보냅니다.
         user_history_list = [msg.summary for msg in all_messages if msg.role == "user" and msg.summary]
-        ai_history_list = [msg.summary for msg in all_messages if msg.role == "ai" and msg.summary]
+        ai_history_list = [msg.summary.split("||")[0] for msg in all_messages if msg.role == "ai" and msg.summary]
 
         return {
             **result,
@@ -230,50 +259,147 @@ async def run_debate_pipeline(user_claim, model_type, personality, attitude, atm
             "total_tokens": model_token_usage[model_type]
         }
 
-    return {"ai_rebuttal": "통신 에러", "total_tokens": 0}
+    return {"ai_rebuttal": "JSON 파싱 에러 발생", "total_tokens": 0}
 
 
 # ==========================================
-# 💡 [5. 심판 평가 파이프라인]
+# 💡 [5. 심판 평가 파이프라인 (그록 스위칭 + 콤보 시스템 결합!)]
 # ==========================================
 async def run_evaluation_pipeline(db: Session, session_string_id: str):
+    global current_groq_index
+
     db_session = db.query(DebateSession).filter(DebateSession.session_string_id == session_string_id).first()
     if not db_session:
         return {"score": 0, "logic_score": 0, "persuasion_score": 0, "strengths": ["데이터 없음"],
-                "weaknesses": ["대화 기록 없음"], "feedback": "토론 기록이 존재하지 않습니다."}
+                "weaknesses": ["대화 기록 없음"], "feedback": "토론 기록이 존재하지 않습니다.", "raw_chat": ""}
 
     past_messages = db.query(Message).filter(Message.session_id == db_session.id).order_by(Message.id.asc()).all()
 
     chat_history = ""
+    groq_logic_sum = 0
+    groq_persuasion_sum = 0
+    ai_turn_count = 0
+
+    # 💡 준성 님 기획: 30점 시작 & 콤보 카운터 장전!
+    final_score = 30
+    combo_count = 0
+
     for msg in past_messages:
         role_prefix = "[나]" if msg.role == "user" else "[AI]"
-        chat_history += f"{role_prefix}: {msg.content}\n"
 
-    if not chat_history.strip():
-        return {"score": 0, "logic_score": 0, "persuasion_score": 0, "strengths": ["데이터 없음"],
-                "weaknesses": ["대화 기록 없음"], "feedback": "토론 기록이 존재하지 않습니다."}
+        # summary에 점수가 숨겨져 있다면 내용에는 안 보이게 잘라냅니다. (DB 에러 방어)
+        clean_content = msg.content
+        chat_history += f"{role_prefix}: {clean_content}\n"
 
-    live_model = get_best_cohere_model()
+        if msg.role == "ai":
+            ai_turn_count += 1
+            turn_logic = 0
+            turn_persuasion = 0
 
+            # 숨겨둔 점수 해독 (||80||90)
+            if msg.summary and "||" in msg.summary:
+                parts = msg.summary.split("||")
+                if len(parts) == 3:
+                    try:
+                        turn_logic = int(parts[1])
+                        turn_persuasion = int(parts[2])
+                    except:
+                        pass
+
+            groq_logic_sum += turn_logic
+            groq_persuasion_sum += turn_persuasion
+
+            turn_total = turn_logic + turn_persuasion
+
+            # 💡 [콤보 시스템 결합] 매 턴 기본 가감산 & 감점 여부 확인
+            is_minus_turn = False
+
+            if turn_total < 50:
+                final_score -= 5
+                is_minus_turn = True
+            elif turn_total < 75:
+                final_score -= 3
+                is_minus_turn = True
+            elif turn_total < 100:
+                final_score += 0
+            elif turn_total < 125:
+                final_score += 3
+            elif turn_total < 150:
+                final_score += 4
+            else:
+                final_score += 5
+
+            # 야생의 콤보 시스템 발동!
+            if is_minus_turn:
+                combo_count = 0  # 감점받으면 콤보 와장창 초기화
+            else:
+                combo_count += 1  # 감점이 아니면(방어 성공) 콤보 스택 1 증가!
+                final_score += combo_count  # 보너스 팍팍 추가!
+
+    if not chat_history.strip() or ai_turn_count == 0:
+        return {"score": 0, "logic_score": 0, "persuasion_score": 0, "strengths": ["데이터 부족"], "weaknesses": ["대화 부족"],
+                "feedback": "평가할 대화 턴이 부족합니다.", "raw_chat": ""}
+
+    # 💡 [초고속 유지] 코히어 버리고 그록으로 계속 갑니다!
     prompt = (
         f"당신은 냉철한 토론 심판입니다. 아래 대화를 분석해 JSON으로만 답하세요.\n"
         f"반드시 다음 구조를 지키세요:\n"
-        f'{{"score": 0~100점, "logic_score": 0~100점, "persuasion_score": 0~100점, '
-        f'"strengths": ["장점1", "장점2"], "weaknesses": ["단점1", "단점2"], "feedback": "상세평"}}'
+        f'{{"strengths": ["장점1", "장점2"], "weaknesses": ["단점1", "단점2"], "feedback": "상세평"}}'
         f"\n\n[대화 기록]\n{chat_history}"
     )
 
     try:
-        if cohere_client:
-            res = cohere_client.chat(model=live_model, message=prompt, temperature=0.3)
-            result = extract_json(res.text)
+        if groq_clients:
+            success = False
+            for _ in range(len(groq_clients)):
+                try:
+                    client = groq_clients[current_groq_index]
+                    res = client.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=[{"role": "user", "content": prompt}],
+                        response_format={"type": "json_object"},
+                        temperature=0.3
+                    )
+                    raw_eval = res.choices[0].message.content
+                    result = extract_json(raw_eval)
+                    success = True
+                    break
+                except Exception as e:
+                    print(f"[경고] Eval Groq API 에러 (Key Index {current_groq_index}): {e}")
+                    current_groq_index = (current_groq_index + 1) % len(groq_clients)
+
+            if not success:
+                raise Exception("등록된 모든 Groq 키가 한도 초과 또는 에러 상태입니다.")
+
             if result:
+                final_score = max(0, final_score)
+
+                avg_logic = int(groq_logic_sum / ai_turn_count)
+                avg_persuasion = int(groq_persuasion_sum / ai_turn_count)
+
+                result['score'] = final_score
+                result['logic_score'] = avg_logic
+                result['persuasion_score'] = avg_persuasion
                 result['raw_chat'] = chat_history
+
                 return result
-        return {"score": 0, "feedback": "심판 호출 실패"}
+
+        return {
+            "score": max(0, final_score),
+            "logic_score": int(groq_logic_sum / ai_turn_count),
+            "persuasion_score": int(groq_persuasion_sum / ai_turn_count),
+            "strengths": ["평가 실패"], "weaknesses": ["평가 실패"],
+            "feedback": "심판 호출 실패: 응답을 해석할 수 없습니다.", "raw_chat": chat_history
+        }
     except Exception as e:
         print(f"Eval Error: {e}")
-        return {"score": 0, "feedback": f"에러 발생: {str(e)}"}
+        return {
+            "score": max(0, final_score),
+            "logic_score": int(groq_logic_sum / ai_turn_count) if ai_turn_count > 0 else 0,
+            "persuasion_score": int(groq_persuasion_sum / ai_turn_count) if ai_turn_count > 0 else 0,
+            "strengths": ["통신 지연"], "weaknesses": ["통신 지연"],
+            "feedback": "⚠️ 통신 에러 발생: 서버가 혼잡하여 응답이 지연되었습니다.", "raw_chat": chat_history
+        }
 
 
 # ==========================================
